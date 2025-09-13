@@ -15,6 +15,7 @@ import json
 import time
 import base64
 import logging
+from pprint import pformat
 from logging.handlers import TimedRotatingFileHandler
 from appdirs import user_config_dir
 from pathlib import Path
@@ -80,13 +81,16 @@ class songIdentificator:
 
                 # Update instance attributes from config
                 self.check_interval = int(self.config.get("checkInterval"))
-                signal_notifier = self.config.get("notifySignal") == True
+                self.max_queue_size = int(self.config.get("maxQueueSize"))
+                signal_notifier = self.config.get("notifySignal")
                 if signal_notifier:
                     self.notify_bot_signal = signalBot.signalBot(
                         self.config["signalSender"],
                         self.config["signalGroup"],
                         self.config["signalEndpoint"],
                     )
+                    self.notifyEachSong = self.config.get("notifyEachSong")
+                    self.notifySummary = self.config.get("notifySummary")
                 else:
                     self.notify_bot_signal = None
             return
@@ -95,23 +99,6 @@ class songIdentificator:
             self.logger.critical(f"Could not load or parse config file: {e}")
     
         raise RuntimeError("Failed to load config.")
-
-    def _send_notifications(self, metadata: dict, final_path: Path):
-        """Sends notifications via configured bots."""
-        message = (
-            f"📟 From: {metadata['show_name']}\n"
-            f"📟 Episode: {metadata['name']}\n"
-            f"📟 Duration: {metadata['duration']}\n\n"
-        )
-
-        artwork_path = final_path.with_suffix(".jpg")
-        
-        if self.notify_bot_signal and artwork_path.exists():
-            with open(artwork_path, "rb") as image_file:
-                encoded_string = base64.b64encode(image_file.read()).decode("utf-8")
-            self.notify_bot_signal.sendMessage(
-                message, silently=True, type="image", binPayload=encoded_string
-            )
 
     def add_cover_art(self, file_path: str, cover_url: str):
         response = requests.get(cover_url)
@@ -246,6 +233,7 @@ class songIdentificator:
             if filename.lower().endswith(supported_extensions)
         ]
 
+        total = len(supported_files)
         count = 0
         count_fallback = 0
         count_fallback_manual = 0
@@ -253,6 +241,9 @@ class songIdentificator:
 
         for filename in supported_files:
             count += 1
+            if count > self.max_queue_size:
+                self.logger.info(f"Max queue {self.max_queue_size} reached, stopping for this cycle.")
+                break
             if filename.lower().endswith(supported_extensions):
                 file_path = os.path.join(folder_path, filename)
                 
@@ -284,6 +275,13 @@ class songIdentificator:
                         new_path = self._rename_file(file_path, artist, title)
                         self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
                         self.logger.info(f"✅Processed!")
+                        if self.notify_bot_signal and self.notifyEachSong:
+                            payload = {
+                                "📻": f"{title} - {artist}",
+                                "image_url": cover_url
+                            }
+                            self.logger.debug(f"✉️ sending notification {payload}")
+                            self.notify_bot_signal.sendMessage(payload=payload)
                     else:
                         count_fallback += 1
                         count_fallback_manual = count_fallback_manual + self.handle_fallback(file_path, folder_path)
@@ -291,7 +289,20 @@ class songIdentificator:
                 except Exception as e:
                     self.handle_fallback(file_path, folder_path)
 
-        self.logger.info(f"🏁Processed: {count}/{count_skipped}/{count_fallback}/{count_fallback_manual} (total/skip/fallback/manual)")
+        self.logger.info(f"🏁Processed: {count - count_skipped}/{total}/{count_skipped}/{count_fallback}/{count_fallback_manual} (processed/total/skip/fallback/manual)")
+        if self.notify_bot_signal and ((count - count_skipped) > self.notifySummary):
+            payload = {
+                "📟": "Song IDentificator9000",
+                "path": str(folder_path)[-21:],
+                "processed": count - count_skipped,
+                "total": total,
+                "skipped": count_skipped,
+                "fallback": count_fallback,
+                "manual": count_fallback_manual
+            }
+            self.logger.debug(f"✉️ sending notification {payload}")
+            self.notify_bot_signal.sendMessage(payload=payload)
+
         return True
 
     def run(self):
