@@ -12,8 +12,11 @@ SCRIPT_DIR = Path(__file__).parent.parent.parent
 class appConfig(pydantic.BaseModel):
     monitored_paths: list[str]
     notifySignal: bool = False
+    notifyEachSong: bool = False
+    notifySummary: Annotated[int, pydantic.Field(ge=0)] = 5
     logLevel: Annotated[str, pydantic.Field(pattern=r'^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$')] = "INFO"
     checkInterval: Annotated[int, pydantic.Field(gt=0)] = 300  
+    maxQueueSize: Annotated[int, pydantic.Field(gt=0)] = 50
     signalSender: str
     signalGroup: str
     signalEndpoint: pydantic.HttpUrl
