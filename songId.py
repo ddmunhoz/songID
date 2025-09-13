@@ -13,7 +13,7 @@ import pydantic
 import shutil
 import json
 import time
-import base64
+import math
 import logging
 from pprint import pformat
 from logging.handlers import TimedRotatingFileHandler
@@ -66,8 +66,9 @@ class songIdentificator:
         config_path = self.SCRIPT_DIR / "config" / "config.json"
         try:
             with open(config_path) as f:
-                config = json.load(f)
-                parsedConfig = appConfig.appConfig(**config)
+                #config = json.load(f)
+                parsedConfig = appConfig.appConfig.load_and_validate(config_path)
+                #parsedConfig = appConfig.appConfig(**config)
                 self.config = parsedConfig.get_data()
                 
                 # Update logger level dynamically
@@ -96,9 +97,22 @@ class songIdentificator:
             return
         
         except (FileNotFoundError, json.JSONDecodeError, pydantic.ValidationError, ValueError) as e:
-            self.logger.critical(f"Could not load or parse config file: {e}")
+            if isinstance(e, pydantic.ValidationError):
+                errors = []
+                for error in e.errors():
+                    errors.append(error['msg'])
+                    self.logger.critical(f"⚙️ Config validation error: {error['msg']}\n")
+            else:
+                self.logger.critical(f"📋 Config error: {str(e)}")
+            sys.exit(1)
     
         raise RuntimeError("Failed to load config.")
+
+    def _estimate_processing_time(self, total_files: int) -> str:
+        cycles = math.ceil(total_files / self.max_queue_size)
+        total_seconds = cycles * self.check_interval
+        hours = total_seconds / 3600
+        return hours
 
     def add_cover_art(self, file_path: str, cover_url: str):
         response = requests.get(cover_url)
@@ -240,66 +254,75 @@ class songIdentificator:
         count_skipped = 0
 
         for filename in supported_files:
-            count += 1
-            if count > self.max_queue_size:
-                self.logger.info(f"Max queue {self.max_queue_size} reached, stopping for this cycle.")
+            file_path = os.path.join(folder_path, filename)
+
+            # Check comment tag before calling Shazam
+            if self._has_roybatty_comment(file_path):
+                count_skipped += 1
+                self.logger.debug(f"☑️ Skipping {filename}")
+                continue
+            
+            if count >= self.max_queue_size:
+                self.logger.info(f"Max queue {self.max_queue_size} reached!")
                 break
-            if filename.lower().endswith(supported_extensions):
-                file_path = os.path.join(folder_path, filename)
-                
-                # Check comment tag before calling Shazam
-                if self._has_roybatty_comment(file_path):
-                    count_skipped += 1
-                    self.logger.debug(f"☑️ Skipping {filename}")
-                    continue
 
-                self.logger.info(f"Searching... {filename}...")
-                try:
-                    out = await shazam.recognize_song(file_path)  # updated method usage
-                    if out and out.get('track'):
-                        track = out['track']
-                        album = None
-                        release_date = None
-                        for section in track.get('sections', []):
-                            if section.get('type') == 'SONG' and 'metadata' in section:
-                                album = section['metadata'][0].get('text') if section['metadata'] else None
-                                release_date =  section['metadata'][2].get('text') if section['metadata'] else None
-                                break
+            self.logger.info(f"Searching... {filename}...")
+            try:
+                count += 1
+                out = await shazam.recognize_song(file_path)
+                if out and out.get('track'):
+                    track = out['track']
+                    album = None
+                    release_date = None
+                    for section in track.get('sections', []):
+                        if section.get('type') == 'SONG' and 'metadata' in section:
+                            album = section['metadata'][0].get('text') if section['metadata'] else None
+                            release_date =  section['metadata'][2].get('text') if section['metadata'] else None
+                            break
 
-                        title = track.get('title')
-                        artist = track.get('subtitle')
-                        cover_url = track.get('images', {}).get('coverart', None)
+                    title = track.get('title')
+                    artist = track.get('subtitle')
+                    cover_url = track.get('images', {}).get('coverart', None)
 
-                        self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}")
-                        self._strip_tags(file_path)
-                        new_path = self._rename_file(file_path, artist, title)
-                        self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
-                        self.logger.info(f"✅Processed!")
-                        if self.notify_bot_signal and self.notifyEachSong:
-                            payload = {
-                                "📻": f"{title} - {artist}",
-                                "image_url": cover_url
-                            }
-                            self.logger.debug(f"✉️ sending notification {payload}")
-                            self.notify_bot_signal.sendMessage(payload=payload)
-                    else:
-                        count_fallback += 1
-                        count_fallback_manual = count_fallback_manual + self.handle_fallback(file_path, folder_path)
+                    self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}")
+                    self._strip_tags(file_path)
+                    new_path = self._rename_file(file_path, artist, title)
+                    self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
+                    self.logger.info(f"✅Processed!")
+                    if self.notify_bot_signal and self.notifyEachSong:
+                        payload = {
+                            "📻": f"{title} - {artist}",
+                            "image_url": cover_url
+                        }
+                        self.logger.debug(f"✉️ sending notification {payload}")
+                        self.notify_bot_signal.sendMessage(payload=payload)
+                else:
+                    count_fallback += 1
+                    count_fallback_manual = count_fallback_manual + self.handle_fallback(file_path, folder_path)
 
-                except Exception as e:
-                    self.handle_fallback(file_path, folder_path)
+            except Exception as e:
+                self.handle_fallback(file_path, folder_path)
+            
+        queueProcessingDuration = self._estimate_processing_time(total)
 
-        self.logger.info(f"🏁Processed: {count - count_skipped}/{total}/{count_skipped}/{count_fallback}/{count_fallback_manual} (processed/total/skip/fallback/manual)")
-        if self.notify_bot_signal and ((count - count_skipped) > self.notifySummary):
+        self.logger.info(f"🏁Processed: {count}/{total}/{count_skipped}/{count_fallback}/{count_fallback_manual} (processed/total/skip/fallback/manual)")
+        self.logger.info(f"Time left: {queueProcessingDuration}")
+
+        if self.notify_bot_signal and ((count) >= self.notifySummary):
             payload = {
                 "📟": "Song IDentificator9000",
                 "path": str(folder_path)[-21:],
-                "processed": count - count_skipped,
+                "processed": count,
                 "total": total,
                 "skipped": count_skipped,
                 "fallback": count_fallback,
                 "manual": count_fallback_manual
             }
+
+            if queueProcessingDuration:
+                payload["time_left"] = f"{queueProcessingDuration:.2f}hours ⏱️"
+            else:
+                payload["✅"] = "completed!"
             self.logger.debug(f"✉️ sending notification {payload}")
             self.notify_bot_signal.sendMessage(payload=payload)
 
@@ -493,7 +516,7 @@ class songIdentificator:
             audio.save()
 
         return tags
-
+ 
 
 if __name__ == "__main__":
     songIdentificator9000 = songIdentificator()
@@ -501,5 +524,7 @@ if __name__ == "__main__":
         songIdentificator9000.run()
     except KeyboardInterrupt:
         print("\nExiting application.")
+        sys.exit(0)
     except Exception:
         songIdentificator9000.logger.exception("A fatal, unhandled error occurred in the main loop.")
+        sys.exit(1)
