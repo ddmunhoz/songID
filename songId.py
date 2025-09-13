@@ -198,7 +198,7 @@ class songIdentificator:
             self.logger.info(f"🟡☑️ Minimal in place...processing...",console=True)
             tags = self._strip_tags(file_path)
             new_path = self._rename_file(file_path, tags.get('artist'), tags.get('title'))
-            self._update_tags(new_path, artist=None, title=None, cover_url=None, add_comment='roybatty')
+            self.update_tags(new_path, add_comment='roybatty')
             self.logger.info(f"🟡✅Processed and RoyBatty compliant!\n",console=True)
             return 0
         else:
@@ -254,7 +254,7 @@ class songIdentificator:
                         self.logger.info(f"👀Found! Title: '{title}' - Artist: '{artist} /album/release_date",console=True)
                         self._strip_tags(file_path)
                         new_path = self._rename_file(file_path, artist, title)
-                        self._update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
+                        self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
                         self.logger.info(f"✅Processed and RoyBatty compliant!\n",console=True)
                     else:
                         count_fallback += 1
@@ -294,7 +294,7 @@ class songIdentificator:
 
     # --- Static Helper Methods ---
     @staticmethod
-    def _minimal_tags_present(file_path: str) -> str:
+    def _minimal_tags_present(file_path: str) -> bool:
         audio = File(file_path, easy=True)
         if audio is None:
             return False
