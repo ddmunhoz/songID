@@ -5,7 +5,7 @@ from typing import List, Dict
 from mutagen import File
 from mutagen.flac import FLAC, Picture
 from mutagen.mp3 import MP3
-from mutagen.id3 import ID3, APIC, error, COMM
+from mutagen.id3 import ID3, APIC, error, COMM, ID3NoHeaderError
 from mutagen.mp4 import MP4, MP4Cover
 import requests
 import pydantic
@@ -216,6 +216,12 @@ class songIdentificator:
         shazam = Shazam()
         supported_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.ogg')
 
+        supported_files = [
+            filename for filename in os.listdir(folder_path)
+            if filename.lower().endswith(supported_extensions)
+        ]
+
+
         self.logger.info(f"🗄️Scanning folder: {folder_path}\n",console=True)
 
         count = 0
@@ -223,7 +229,7 @@ class songIdentificator:
         count_fallback_manual = 0
         count_skipped = 0
 
-        for filename in os.listdir(folder_path):
+        for filename in supported_files:
             count += 1
             if filename.lower().endswith(supported_extensions):
                 file_path = os.path.join(folder_path, filename)
@@ -316,7 +322,12 @@ class songIdentificator:
 
         # MP3 raw ID3 check
         if ext == '.mp3':
-            id3 = ID3(file_path)
+            try:
+                id3 = ID3(file_path)
+            except ID3NoHeaderError:
+                id3 = ID3()            # Create empty ID3 tag object
+                id3.save(file_path) 
+            
             for comm in id3.getall("COMM"):
                 if 'roybatty' in comm.text[0].lower():
                     return True
