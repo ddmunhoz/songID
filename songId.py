@@ -1,4 +1,5 @@
 import os
+import sys
 import asyncio
 from shazamio import Shazam, Serialize
 from typing import List, Dict
@@ -13,11 +14,13 @@ import shutil
 import json
 import time
 import base64
+import logging
+from logging.handlers import TimedRotatingFileHandler
 from appdirs import user_config_dir
 from pathlib import Path
 
 from tools.messaging_signal import signalBot
-from tools.logger import narsLogger
+#from tools.logger import narsLogger
 from tools.appConfig import appConfig
 
 class songIdentificator:
@@ -30,21 +33,33 @@ class songIdentificator:
         self.notify_bot_signal = None
         self._reload_config()  # Initial config load
 
-    def _setup_logging(self,lvl) -> narsLogger.narsLogger:
+    def _setup_logging(self,lvl) -> logging.Logger:
         """Sets up a timed rotating file logger."""
         log_path = self.SCRIPT_DIR / "logs" / "log.txt"
         log_path.parent.mkdir(exist_ok=True)
-        logger = narsLogger.logging.getLogger("log")
+        logger = logging.getLogger("log")
+      
+        handler = TimedRotatingFileHandler(log_path, when="D", interval=1, backupCount=7)
         logger.setLevel(lvl)
-        formatter = narsLogger.logging.Formatter(
-            fmt="%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
+        formatter_logs = logging.Formatter(
+            fmt="%(asctime)s %(levelname)-6s %(message)s",
             datefmt="%m-%d-%y %H:%M:%S",
         )
-        handler = narsLogger.TimedRotatingFileHandler(log_path, when="D", interval=1, backupCount=7)
-        handler.setFormatter(formatter)
+        handler.setFormatter(formatter_logs)
         logger.addHandler(handler)
+
+         # Console handler writing logs to console (stdout)
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setLevel(lvl)  # Console shows INFO and above
+        formatter_console = logging.Formatter(
+            fmt="%(asctime)s %(message)s",
+            datefmt="%m-%d %H:%M:%S",
+        )
+        console_handler.setFormatter(formatter_console)
+        logger.addHandler(console_handler)
+
         self.logger_raw = logger
-        return narsLogger.narsLogger(logger)
+        return logger
     
     def _reload_config(self):
         """Loads and reloads configuration from the JSON file."""
@@ -56,9 +71,13 @@ class songIdentificator:
                 self.config = parsedConfig.get_data()
                 
                 # Update logger level dynamically
-                log_level_str = self.config.get("logLevel").upper()
-                log_level = getattr(narsLogger.logging, log_level_str)
+                log_level = self.config.get("logLevel").upper()
                 self.logger_raw.setLevel(log_level)
+                
+                #self.logger_raw.setLevel(log_level)
+                for handler in self.logger_raw.handlers:
+                    if isinstance(handler, logging.StreamHandler):
+                        handler.setLevel(log_level)
 
                 # Update instance attributes from config
                 self.check_interval = int(self.config.get("checkInterval"))
@@ -74,7 +93,7 @@ class songIdentificator:
             return
         
         except (FileNotFoundError, json.JSONDecodeError, pydantic.ValidationError, ValueError) as e:
-            self.logger.critical(f"Could not load or parse config file: {e}", console=True)
+            self.logger.critical(f"Could not load or parse config file: {e}")
     
         raise RuntimeError("Failed to load config.")
 
@@ -98,7 +117,7 @@ class songIdentificator:
     def add_cover_art(self, file_path: str, cover_url: str):
         response = requests.get(cover_url)
         if response.status_code != 200:
-            self.logger.error(f"Failed to download cover art from {cover_url}",console=True)
+            self.logger.error(f"Failed to download cover art from {cover_url}")
             return 
         
         image_data = response.content
@@ -118,7 +137,7 @@ class songIdentificator:
         elif ext == '.m4a':
             self._add_cover_m4a(file_path, image_data)
         else:
-            self.logger.error(f"Cover art embedding not supported for {file_path}",console=True)
+            self.logger.error(f"Cover art embedding not supported for {file_path}")
 
     def update_mp3_tags(self, file_path: str, cover_url: str=None, add_comment: str=None):
         if add_comment:
@@ -197,27 +216,27 @@ class songIdentificator:
         manual_input_dir = os.path.join(folder_path, 'manual_input')
         os.makedirs(manual_input_dir, exist_ok=True)
 
-        self.logger.debug(f"🟡Could not find {os.path.basename(file_path)}",console=True)
-        self.logger.debug(f"🟡🔵Fallback using minimal tags...",console=True)
+        self.logger.debug(f"🟡Could not find {os.path.basename(file_path)}")
+        self.logger.debug(f"🟡🔵Fallback using minimal tags...")
         
         if self._minimal_tags_present(file_path):
-            self.logger.info(f"🟡☑️ Minimal in place...processing...",console=True)
+            self.logger.info(f"🟡☑️ Minimal in place...processing...")
             tags = self._strip_tags(file_path)
             new_path = self._rename_file(file_path, tags.get('artist'), tags.get('title'))
             self.update_tags(new_path, add_comment='roybatty')
-            self.logger.info(f"🟡✅Processed!",console=True)
+            self.logger.info(f"🟡✅Processed!")
             return 0
         else:
-            self.logger.info(f"☔️ I guess all these tags are lost in time like tears in rain...",console=True)
+            self.logger.info(f"☔️ I guess all these tags are lost in time like tears in rain...")
             destination = os.path.join(manual_input_dir, os.path.basename(file_path))
             shutil.move(file_path, destination)
-            self.logger.info(f"🕊️ Moved for manual input.",console=True)
+            self.logger.info(f"🕊️ Moved for manual input.")
             return 1
 
     async def recognize_tracks_in_folder(self, folder_path: str) -> List[Dict]:
-        self.logger.info(f"🗄️Scanning folder: {folder_path}",console=True)
+        self.logger.info(f"🗄️Scanning folder: {folder_path}")
         if not os.path.isdir(folder_path):
-            self.logger.error(f"Error: The folder '{folder_path}' does not exist.",console=True)
+            self.logger.error(f"Error: The folder '{folder_path}' does not exist.")
             return []
 
         shazam = Shazam()
@@ -241,10 +260,10 @@ class songIdentificator:
                 # Check comment tag before calling Shazam
                 if self._has_roybatty_comment(file_path):
                     count_skipped += 1
-                    self.logger.debug(f"☑️ Skipping {filename}",console=True)
+                    self.logger.debug(f"☑️ Skipping {filename}")
                     continue
 
-                self.logger.info(f"Searching... {filename}...",console=True)
+                self.logger.info(f"Searching... {filename}...")
                 try:
                     out = await shazam.recognize_song(file_path)  # updated method usage
                     if out and out.get('track'):
@@ -261,11 +280,11 @@ class songIdentificator:
                         artist = track.get('subtitle')
                         cover_url = track.get('images', {}).get('coverart', None)
 
-                        self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}",console=True)
+                        self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}")
                         self._strip_tags(file_path)
                         new_path = self._rename_file(file_path, artist, title)
                         self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
-                        self.logger.info(f"✅Processed!",console=True)
+                        self.logger.info(f"✅Processed!")
                     else:
                         count_fallback += 1
                         count_fallback_manual = count_fallback_manual + self.handle_fallback(file_path, folder_path)
@@ -273,13 +292,13 @@ class songIdentificator:
                 except Exception as e:
                     self.handle_fallback(file_path, folder_path)
 
-        self.logger.info(f"🏁Processed: {count}/{count_skipped}/{count_fallback}/{count_fallback_manual} (total/skip/fallback/manual)",console=True)
+        self.logger.info(f"🏁Processed: {count}/{count_skipped}/{count_fallback}/{count_fallback_manual} (total/skip/fallback/manual)")
         return True
 
     def run(self):
         while True:
             start_time = time.time()
-            self.logger.info("--- Starting new song identification check cycle ---",console=True)
+            self.logger.info("--- Starting new song identification check cycle ---")
             self._reload_config()  # Check for config changes at the start of each loop
             
             monitored_paths = self.config.get('monitored_paths')
@@ -288,15 +307,15 @@ class songIdentificator:
                     asyncio.run(self.recognize_tracks_in_folder(path))
                
             except (json.JSONDecodeError) as e:
-                self.logger.critical(f"Could not load monitored paths {e}",console=True)
+                self.logger.critical(f"Could not load monitored paths {e}")
                 raise RuntimeError("Could not load monitored paths!")
 
 
-            self.logger.info("--- Cycle finished ---",console=True)
+            self.logger.info("--- Cycle finished ---")
             # Sleep for the remainder of the interval
             elapsed_time = time.time() - start_time
             sleep_duration = max(0, self.check_interval - elapsed_time)
-            self.logger.info(f"Sleeping for {sleep_duration:.2f} seconds.",console=True)
+            self.logger.info(f"Sleeping for {sleep_duration:.2f} seconds.")
             time.sleep(sleep_duration)
 
     # --- Static Helper Methods ---
