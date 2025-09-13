@@ -20,17 +20,6 @@ class signalBot:
         """
 
         if payload:
-            # Build dynamic message from payload
-            lines = []
-            for key, value in payload.items():
-                if isinstance(value, (dict, list)):
-                    value_str = pformat(value)
-                else:
-                    value_str = str(value)
-                key_str = key.replace('_', ' ').capitalize()
-                lines.append(f"📟 {key_str}: {value_str}")
-            bot_message = "\n".join(lines) + "\n"
-
             # Check for image URL in payload
             image_url = payload.get('image_url')
             if image_url:
@@ -39,10 +28,22 @@ class signalBot:
                     resp.raise_for_status()
                     binPayload = base64.b64encode(resp.content).decode('utf-8')
                     type = 'image'
+                    payload.pop('image_url', None)  # Remove image_url from text message
                 except Exception as e:
                     logging.warning(f"Failed to fetch image {image_url}: {e}")
                     type = 'text'
                     binPayload = None
+
+            # Build dynamic message from payload
+            lines = []
+            for key, value in payload.items():
+                if isinstance(value, (dict, list)):
+                    value_str = pformat(value)
+                else:
+                    value_str = str(value)
+                key_str = key.replace('_', ' ').capitalize()
+                lines.append(f"{key_str}: {value_str}")
+            bot_message = "\n".join(lines) + "\n"
 
         if not bot_message:
             bot_message = "No message content provided."
