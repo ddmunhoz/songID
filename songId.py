@@ -417,13 +417,10 @@ class songIdentificator:
         extension = os.path.splitext(file_path)[1]
         new_name = f"{safe_artist} - {safe_title}{extension}"
         new_path = os.path.join(directory, new_name)
-        
+
         if file_path != new_path:
             os.rename(file_path, new_path)
-            print(f"     Renamed to: {new_path}")
-        else:
-            print("     Filename already correct.")
-        
+
         return new_path
 
     @staticmethod
@@ -495,14 +492,3 @@ if __name__ == "__main__":
         print("\nExiting application.")
     except Exception:
         songIdentificator9000.logger.exception("A fatal, unhandled error occurred in the main loop.")
-
-
-
-# async def main():
-#     CONFIG_DIR = Path(user_config_dir("library"))
-#     folder_to_scan = '/Users/munhoz/Desktop/Projects/Code/active/mine/songId/songs' 
-#     recognize_tracks_in_folder(folder_to_scan)
-    
-# if __name__ == "__main__":
-#     asyncio.run(main())
-
