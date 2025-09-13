@@ -20,7 +20,6 @@ from appdirs import user_config_dir
 from pathlib import Path
 
 from tools.messaging_signal import signalBot
-#from tools.logger import narsLogger
 from tools.appConfig import appConfig
 
 class songIdentificator:
