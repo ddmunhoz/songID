@@ -25,17 +25,17 @@ class songIdentificator:
     CONFIG_DIR = Path(user_config_dir("config"))
 
     def __init__(self):
-        self.logger = self._setup_logging()
+        self.logger = self._setup_logging("INFO")
         self.config = {}
         self.notify_bot_signal = None
         self._reload_config()  # Initial config load
 
-    def _setup_logging(self) -> narsLogger.narsLogger:
+    def _setup_logging(self,lvl) -> narsLogger.narsLogger:
         """Sets up a timed rotating file logger."""
         log_path = self.SCRIPT_DIR / "logs" / "log.txt"
         log_path.parent.mkdir(exist_ok=True)
         logger = narsLogger.logging.getLogger("log")
-        logger.setLevel(narsLogger.logging.INFO)
+        logger.setLevel(lvl)
         formatter = narsLogger.logging.Formatter(
             fmt="%(asctime)s %(name)-12s %(levelname)-8s %(message)s",
             datefmt="%m-%d-%y %H:%M:%S",
@@ -43,6 +43,7 @@ class songIdentificator:
         handler = narsLogger.TimedRotatingFileHandler(log_path, when="D", interval=1, backupCount=7)
         handler.setFormatter(formatter)
         logger.addHandler(handler)
+        self.logger_raw = logger
         return narsLogger.narsLogger(logger)
     
     def _reload_config(self):
@@ -54,6 +55,11 @@ class songIdentificator:
                 parsedConfig = appConfig.appConfig(**config)
                 self.config = parsedConfig.get_data()
                 
+                # Update logger level dynamically
+                log_level_str = self.config.get("logLevel").upper()
+                log_level = getattr(narsLogger.logging, log_level_str)
+                self.logger_raw.setLevel(log_level)
+
                 # Update instance attributes from config
                 self.check_interval = int(self.config.get("checkInterval"))
                 signal_notifier = self.config.get("notifySignal") == True
@@ -161,7 +167,7 @@ class songIdentificator:
     def update_tags(self, file_path: str, artist: str=None, title: str=None, cover_url: str=None, album: str=None, release_date: str=None, add_comment: str=None):
         audio = File(file_path, easy=True)
         if audio is None:
-            print(f"Unsupported or invalid audio file: {file_path}")
+            self.logger.critical(f"Unsupported or invalid audio file: {file_path}")
             return file_path
         
         if artist:
@@ -191,24 +197,25 @@ class songIdentificator:
         manual_input_dir = os.path.join(folder_path, 'manual_input')
         os.makedirs(manual_input_dir, exist_ok=True)
 
-        self.logger.info(f"🟡Could not recognize '{os.path.basename(file_path)}'!",console=True)
-        self.logger.info(f"🟡🔵Trying fallback using minimal tags...",console=True)
+        self.logger.debug(f"🟡Could not find {os.path.basename(file_path)}",console=True)
+        self.logger.debug(f"🟡🔵Fallback using minimal tags...",console=True)
         
         if self._minimal_tags_present(file_path):
             self.logger.info(f"🟡☑️ Minimal in place...processing...",console=True)
             tags = self._strip_tags(file_path)
             new_path = self._rename_file(file_path, tags.get('artist'), tags.get('title'))
             self.update_tags(new_path, add_comment='roybatty')
-            self.logger.info(f"🟡✅Processed and RoyBatty compliant!\n",console=True)
+            self.logger.info(f"🟡✅Processed!",console=True)
             return 0
         else:
             self.logger.info(f"☔️ I guess all these tags are lost in time like tears in rain...",console=True)
             destination = os.path.join(manual_input_dir, os.path.basename(file_path))
             shutil.move(file_path, destination)
-            self.logger.warning(f"🕊️ Moved for manual input.\n",console=True)
+            self.logger.info(f"🕊️ Moved for manual input.",console=True)
             return 1
 
     async def recognize_tracks_in_folder(self, folder_path: str) -> List[Dict]:
+        self.logger.info(f"🗄️Scanning folder: {folder_path}",console=True)
         if not os.path.isdir(folder_path):
             self.logger.error(f"Error: The folder '{folder_path}' does not exist.",console=True)
             return []
@@ -220,9 +227,6 @@ class songIdentificator:
             filename for filename in os.listdir(folder_path)
             if filename.lower().endswith(supported_extensions)
         ]
-
-
-        self.logger.info(f"🗄️Scanning folder: {folder_path}\n",console=True)
 
         count = 0
         count_fallback = 0
@@ -237,10 +241,10 @@ class songIdentificator:
                 # Check comment tag before calling Shazam
                 if self._has_roybatty_comment(file_path):
                     count_skipped += 1
-                    self.logger.info(f"☑️ Skipping {filename}",console=True)
+                    self.logger.debug(f"☑️ Skipping {filename}",console=True)
                     continue
 
-                self.logger.info(f"🔦Recognizing '{filename}'...",console=True)
+                self.logger.info(f"Searching... {filename}...",console=True)
                 try:
                     out = await shazam.recognize_song(file_path)  # updated method usage
                     if out and out.get('track'):
@@ -257,11 +261,11 @@ class songIdentificator:
                         artist = track.get('subtitle')
                         cover_url = track.get('images', {}).get('coverart', None)
 
-                        self.logger.info(f"👀Found! Title: '{title}' - Artist: '{artist} /album/release_date",console=True)
+                        self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}",console=True)
                         self._strip_tags(file_path)
                         new_path = self._rename_file(file_path, artist, title)
                         self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
-                        self.logger.info(f"✅Processed and RoyBatty compliant!\n",console=True)
+                        self.logger.info(f"✅Processed!",console=True)
                     else:
                         count_fallback += 1
                         count_fallback_manual = count_fallback_manual + self.handle_fallback(file_path, folder_path)
@@ -269,10 +273,7 @@ class songIdentificator:
                 except Exception as e:
                     self.handle_fallback(file_path, folder_path)
 
-        self.logger.info(f"\n🏁Done! Processed {count} files.",console=True)
-        self.logger.info(f"🏁->skipped {count_skipped}",console=True)
-        self.logger.info(f"🏁->fallback {count_fallback}",console=True)
-        self.logger.info(f"🏁->manual {count_fallback_manual}",console=True)
+        self.logger.info(f"🏁Processed: {count}/{count_skipped}/{count_fallback}/{count_fallback_manual} (total/skip/fallback/manual)",console=True)
         return True
 
     def run(self):

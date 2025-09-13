@@ -12,10 +12,18 @@ SCRIPT_DIR = Path(__file__).parent.parent.parent
 class appConfig(pydantic.BaseModel):
     monitored_paths: list[str]
     notifySignal: bool = False
+    logLevel: Annotated[str, pydantic.Field(pattern=r'^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$')] = "INFO"
     checkInterval: Annotated[int, pydantic.Field(gt=0)] = 300  
     signalSender: str
     signalGroup: str
     signalEndpoint: pydantic.HttpUrl
+
+    @pydantic.field_validator('logLevel', mode='before')
+    @classmethod
+    def uppercase_log_level(cls, v):
+        if isinstance(v, str):
+            return v.upper()
+        return v
     
     @pydantic.field_validator('signalSender')
     @classmethod
