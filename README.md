@@ -46,3 +46,51 @@ All settings are managed via a JSON config file located at `config/config.json` 
     "signalGroup": "group.YourSignalGroupID==",
     "signalEndpoint": "http://your.signal.server:port"
 }
+```
+
+### Config Options
+
+- **monitored_paths**: List of folders to scan for new songs.
+- **notifySignal**: Set to `true` to enable Signal notifications.
+- **notifyEachSong**: If `true`, sends a notification for each processed song.
+- **notifySummary**: Minimum number of processed songs before sending a summary notification.
+- **checkInterval**: Time (in seconds) between scan cycles.
+- **maxQueueSize**: Maximum number of files processed per scan cycle (prevents excessive requests).
+- **logLevel**: Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`).
+- **signalSender**: Your Signal sender phone number (format: `+1234567890`).
+- **signalGroup**: Signal group ID (format: `group.xxxxx==`).
+- **signalEndpoint**: URL of your Signal REST API server.
+
+## Usage
+
+1. **Install dependencies** (see requirements.txt or use pip for Python packages).
+2. **Edit `config/config.json`** with your paths and Signal settings.
+3. **Run the script**:
+
+    ```sh
+    python songId.py
+    ```
+
+The tool will continuously scan your folders, process new songs, and log its activity.
+
+## Logging
+
+Logs are saved in `logs/log.txt` and rotated daily. Console output is also provided.
+
+## Request Limits & Best Practices
+
+**Important:**  
+Shazam and Signal APIs may rate-limit or block you if you make too many requests in a short period.
+- Use `maxQueueSize` and `checkInterval` to control how many files are processed per cycle and how often scans occur.
+- Avoid setting these values too high, especially if scanning large folders or running frequently.
+- Respect API terms of service and avoid unnecessary repeated scans.
+
+## Troubleshooting
+
+- Make sure your config file is valid JSON and all required fields are present.
+- Ensure your Signal REST API server is running and accessible if notifications are enabled.
+- Supported audio formats must have readable tags.
+
+## License
+
+MIT License
