@@ -12,6 +12,9 @@
 - Handles fallback/manual tagging for unrecognized tracks.
 - Sends notifications via Signal (with cover art) when enabled.
 - Rotating log file and console logging.
+- Configurable scan interval and queue size to avoid excessive requests.
+- Summary notifications after batch processing.
+- Manual input folder for files needing human tagging.
 
 ## Supported Formats
 
@@ -34,7 +37,10 @@ All settings are managed via a JSON config file located at `config/config.json` 
         "/another/path/to/scan"
     ],
     "notifySignal": true,
+    "notifyEachSong": false,
+    "notifySummary": 5,
     "checkInterval": 15,
+    "maxQueueSize": 20,
     "logLevel": "INFO",
     "signalSender": "+1234567890",
     "signalGroup": "group.YourSignalGroupID==",
