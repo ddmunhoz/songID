@@ -84,6 +84,7 @@ class songIdentificator:
                 self.check_interval = int(self.config.get("checkInterval"))
                 self.max_queue_size = int(self.config.get("maxQueueSize"))
                 self.rename_and_move_only = self.config.get("renameAndMoveOnly")
+                self.remove_empty_folders = self.config.get("removeEmptyFolders")
                 signal_notifier = self.config.get("notifySignal")
                 if signal_notifier:
                     self.notify_bot_signal = signalBot.signalBot(
@@ -267,6 +268,9 @@ class songIdentificator:
 
         for filename in supported_files:
             file_path = os.path.join(folder_path, filename)
+
+            if self.remove_empty_folders:
+                self._remove_empty_folders(folder_path)
 
             if self.rename_and_move_only:
                 self.handle_fallback(file_path, folder_path)
@@ -485,16 +489,16 @@ class songIdentificator:
                 quality_info["quality_category"] = "Lossless"
         elif ext in ['.mp3', '.m4a', '.ogg']:
             # Lossy formats - categorize by bitrate
-            bitrate = quality_info["bitrate"]
-            if bitrate >= 320:
+            bitrate_kbps = (quality_info["bitrate"] or 0) // 1000  # Convert bps to kbps
+            if bitrate_kbps >= 320:
                 quality_info["quality_category"] = "High (320+ kbps)"
-            elif bitrate >= 256:
+            elif bitrate_kbps >= 256:
                 quality_info["quality_category"] = "High (256+ kbps)"
-            elif bitrate >= 192:
+            elif bitrate_kbps >= 192:
                 quality_info["quality_category"] = "Medium (192+ kbps)"
-            elif bitrate >= 128:
+            elif bitrate_kbps >= 128:
                 quality_info["quality_category"] = "Medium (128+ kbps)"
-            elif bitrate > 0:
+            elif bitrate_kbps > 0:
                 quality_info["quality_category"] = "Low (<128 kbps)"
             else:
                 quality_info["quality_category"] = "Unknown"
@@ -614,6 +618,13 @@ class songIdentificator:
 
         return tags
 
+    @staticmethod
+    def _remove_empty_folders(root_folder):
+        for root, dirs, files in os.walk(root_folder, topdown=False):
+            for d in dirs:
+                full_path = os.path.join(root, d)
+                if not os.listdir(full_path):
+                    os.rmdir(full_path)
 
 if __name__ == "__main__":
     songIdentificator9000 = songIdentificator()

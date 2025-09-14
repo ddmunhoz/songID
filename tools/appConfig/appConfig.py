@@ -29,7 +29,8 @@ class appConfig(pydantic.BaseModel):
     monitored_paths: list[str]
     maxQueueSize: Annotated[int, pydantic.Field(gt=0)] = 50
     checkInterval: Annotated[int, pydantic.Field(gt=0)] = 300
-    renameAndMoveOnly: bool = False  
+    renameAndMoveOnly: bool = False
+    removeEmptyFolders: bool = True 
     notifySignal: bool = False
     notifyEachSong: bool = False
     notifySummary: Annotated[int, pydantic.Field(ge=0)] = 5
