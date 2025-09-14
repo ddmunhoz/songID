@@ -28,7 +28,8 @@ class appConfig(pydantic.BaseModel):
     logLevel: Annotated[str, pydantic.Field(pattern=r'^(DEBUG|INFO|WARNING|ERROR|CRITICAL)$')] = "INFO"
     monitored_paths: list[str]
     maxQueueSize: Annotated[int, pydantic.Field(gt=0)] = 50
-    checkInterval: Annotated[int, pydantic.Field(gt=0)] = 300  
+    checkInterval: Annotated[int, pydantic.Field(gt=0)] = 300
+    renameAndMoveOnly: bool = False  
     notifySignal: bool = False
     notifyEachSong: bool = False
     notifySummary: Annotated[int, pydantic.Field(ge=0)] = 5

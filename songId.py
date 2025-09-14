@@ -83,6 +83,7 @@ class songIdentificator:
                 # Update instance attributes from config
                 self.check_interval = int(self.config.get("checkInterval"))
                 self.max_queue_size = int(self.config.get("maxQueueSize"))
+                self.rename_and_move_only = self.config.get("renameAndMoveOnly")
                 signal_notifier = self.config.get("notifySignal")
                 if signal_notifier:
                     self.notify_bot_signal = signalBot.signalBot(
@@ -219,10 +220,16 @@ class songIdentificator:
         self.logger.debug(f"🟡Could not find {os.path.basename(file_path)}")
         self.logger.debug(f"🟡🔵Fallback using minimal tags...")
         
+        if self.rename_and_move_only:
+            self.logger.info(f"✅ Moving only {file_path}")
+            tags = self._read_tags(file_path)
+            new_path = self._rename_and_move(file_path, tags.get('artist'), tags.get('title'))
+            return 3
+
         if self._minimal_tags_present(file_path):
             self.logger.info(f"🟡☑️ Minimal in place...processing...")
             tags = self._strip_tags(file_path)
-            new_path = self._rename_file(file_path, tags.get('artist'), tags.get('title'))
+            new_path = self._rename_and_move(file_path, tags.get('artist'), tags.get('title'))
             self.update_tags(new_path, add_comment='roybatty')
             self.logger.info(f"🟡✅Processed!")
             return 0
@@ -256,7 +263,14 @@ class songIdentificator:
         for filename in supported_files:
             file_path = os.path.join(folder_path, filename)
 
-            # Check comment tag before calling Shazam
+            if self.rename_and_move_only:
+                self.handle_fallback(file_path, folder_path)
+                count_skipped += 1
+                count += 1
+                self.logger.debug(f"☑️ Rename and Move only {filename}")
+                continue
+
+            #Check comment tag before calling Shazam
             if self._has_roybatty_comment(file_path):
                 count_skipped += 1
                 self.logger.debug(f"☑️ Skipping {filename}")
@@ -286,7 +300,7 @@ class songIdentificator:
 
                     self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}")
                     self._strip_tags(file_path)
-                    new_path = self._rename_file(file_path, artist, title)
+                    new_path = self._rename_and_move(file_path, artist, title)
                     self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
                     self.logger.info(f"✅Processed!")
                     if self.notify_bot_signal and self.notifyEachSong:
@@ -319,7 +333,7 @@ class songIdentificator:
                 "manual": count_fallback_manual
             }
 
-            if queueProcessingDuration:
+            if queueProcessingDuration > 0.20:
                 payload["time_left"] = f"{queueProcessingDuration:.2f}hours ⏱️"
             else:
                 payload["✅"] = "completed!"
@@ -443,14 +457,20 @@ class songIdentificator:
         return audio
 
     @staticmethod
-    def _rename_file(file_path: str, artist: str, title: str) -> str:
+    def _rename_and_move(file_path: str, artist: str, title: str) -> str:
+        # Sanitize artist and title for filesystem
         safe_artist = artist.replace("/", "_") if artist else "Unknown"
         safe_title = title.replace("/", "_") if title else "Unknown"
 
-        directory = os.path.dirname(file_path)
         extension = os.path.splitext(file_path)[1]
         new_name = f"{safe_artist} - {safe_title}{extension}"
-        new_path = os.path.join(directory, new_name)
+
+        # move to artist subfolder
+        parent_dir = os.path.dirname(file_path)
+        target_artist_dir = os.path.join(parent_dir, safe_artist)
+        os.makedirs(target_artist_dir, exist_ok=True)
+
+        new_path = os.path.join(target_artist_dir, new_name)
 
         if file_path != new_path:
             os.rename(file_path, new_path)
@@ -517,6 +537,21 @@ class songIdentificator:
 
         return tags
  
+    @staticmethod
+    def _read_tags(file_path: str) -> Dict[str, str]:
+        audio = File(file_path)
+        if audio is None:
+            print(f"Unsupported or invalid audio file: {file_path}")
+            return {}
+
+        tags = {}
+        
+        easy_audio = File(file_path, easy=True)
+        tags['title'] = easy_audio.get('title', [None])[0] if easy_audio else None
+        tags['artist'] = easy_audio.get('artist', [None])[0] if easy_audio else None
+
+        return tags
+
 
 if __name__ == "__main__":
     songIdentificator9000 = songIdentificator()
