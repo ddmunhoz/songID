@@ -221,15 +221,15 @@ class songIdentificator:
         self.logger.debug(f"🟡🔵Fallback using minimal tags...")
         
         if self.rename_and_move_only:
-            self.logger.info(f"✅ Moving only {file_path}")
+            self.logger.info(f"✅ Rename and Moving only {file_path}")
             tags = self._read_tags(file_path)
-            new_path = self._rename_and_move(file_path, tags.get('artist'), tags.get('title'))
+            new_path = self._rename_and_move(file_path, folder_path, tags.get('artist'), tags.get('title'))
             return 3
 
         if self._minimal_tags_present(file_path):
             self.logger.info(f"🟡☑️ Minimal in place...processing...")
             tags = self._strip_tags(file_path)
-            new_path = self._rename_and_move(file_path, tags.get('artist'), tags.get('title'))
+            new_path = self._rename_and_move(file_path, folder_path, tags.get('artist'), tags.get('title'))
             self.update_tags(new_path, add_comment='roybatty')
             self.logger.info(f"🟡✅Processed!")
             return 0
@@ -253,6 +253,11 @@ class songIdentificator:
             filename for filename in os.listdir(folder_path)
             if filename.lower().endswith(supported_extensions)
         ]
+
+        for root, dirs, files in os.walk(folder_path):
+            for filename in files:
+                if filename.lower().endswith(supported_extensions):
+                    supported_files.append(os.path.join(root, filename))
 
         total = len(supported_files)
         count = 0
@@ -300,7 +305,7 @@ class songIdentificator:
 
                     self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}")
                     self._strip_tags(file_path)
-                    new_path = self._rename_and_move(file_path, artist, title)
+                    new_path = self._rename_and_move(file_path, folder_path, artist, title)
                     self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
                     self.logger.info(f"✅Processed!")
                     if self.notify_bot_signal and self.notifyEachSong:
@@ -457,24 +462,81 @@ class songIdentificator:
         return audio
 
     @staticmethod
-    def _rename_and_move(file_path: str, artist: str, title: str) -> str:
-        # Sanitize artist and title for filesystem
+    def _extract_audio_quality(file_path: str) -> Dict[str, any]:
+        """Extract audio quality information from the file."""
+        audio = File(file_path)
+        if audio is None:
+            return {"quality_category": "Unknown", "bitrate": 0, "sample_rate": 0}
+        
+        quality_info = {
+            "bitrate": getattr(audio.info, 'bitrate', 0),
+            "sample_rate": getattr(audio.info, 'sample_rate', 0),
+            "channels": getattr(audio.info, 'channels', 0),
+            "length": getattr(audio.info, 'length', 0)
+        }
+        
+        # Add format-specific information
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == '.flac':
+            # FLAC is lossless
+            flac_audio = FLAC(file_path)
+            if flac_audio and flac_audio.info:
+                quality_info["bits_per_sample"] = getattr(flac_audio.info, 'bits_per_sample', 16)
+                quality_info["quality_category"] = "Lossless"
+        elif ext in ['.mp3', '.m4a', '.ogg']:
+            # Lossy formats - categorize by bitrate
+            bitrate = quality_info["bitrate"]
+            if bitrate >= 320:
+                quality_info["quality_category"] = "High (320+ kbps)"
+            elif bitrate >= 256:
+                quality_info["quality_category"] = "High (256+ kbps)"
+            elif bitrate >= 192:
+                quality_info["quality_category"] = "Medium (192+ kbps)"
+            elif bitrate >= 128:
+                quality_info["quality_category"] = "Medium (128+ kbps)"
+            elif bitrate > 0:
+                quality_info["quality_category"] = "Low (<128 kbps)"
+            else:
+                quality_info["quality_category"] = "Unknown"
+        elif ext == '.wav':
+            # WAV is typically lossless
+            quality_info["quality_category"] = "Lossless"
+        else:
+            quality_info["quality_category"] = "Unknown"
+            
+        return quality_info
+
+    @staticmethod
+    def _rename_and_move(file_path: str, folder_path: str, artist: str, title: str) -> str:
         safe_artist = artist.replace("/", "_") if artist else "Unknown"
         safe_title = title.replace("/", "_") if title else "Unknown"
-
+        
+        quality_info = songIdentificator._extract_audio_quality(file_path)
+        quality_folder = quality_info["quality_category"].replace("/", "_").replace("<", "").replace(">", "")
+        
         extension = os.path.splitext(file_path)[1]
         new_name = f"{safe_artist} - {safe_title}{extension}"
-
-        # move to artist subfolder
-        parent_dir = os.path.dirname(file_path)
-        target_artist_dir = os.path.join(parent_dir, safe_artist)
-        os.makedirs(target_artist_dir, exist_ok=True)
-
-        new_path = os.path.join(target_artist_dir, new_name)
-
+        
+        # Get current path components
+        current_dir = os.path.dirname(file_path)
+        current_dir_name = os.path.basename(current_dir)
+     
+        # Check if already in correct structure
+        is_in_correct_folder = current_dir_name == f"{safe_artist}/{quality_folder}"
+        
+        if is_in_correct_folder == True:
+            # File is already in correct location, just rename if needed
+            new_path = os.path.join(current_dir, new_name)
+        else:
+            # Need to move to correct structure
+            target_artist_dir = os.path.join(folder_path, safe_artist)
+            target_quality_dir = os.path.join(target_artist_dir, quality_folder)
+            os.makedirs(target_quality_dir, exist_ok=True)
+            new_path = os.path.join(target_quality_dir, new_name)
+        
         if file_path != new_path:
             os.rename(file_path, new_path)
-
+        
         return new_path
 
     @staticmethod
