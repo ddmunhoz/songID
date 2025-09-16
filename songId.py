@@ -94,6 +94,7 @@ class songIdentificator:
                     )
                     self.notifyEachSong = self.config.get("notifyEachSong")
                     self.notifySummary = self.config.get("notifySummary")
+                    self.notifyErrors = self.config.get("notifyErrors")
                 else:
                     self.notify_bot_signal = None
             return
@@ -250,47 +251,46 @@ class songIdentificator:
         shazam = Shazam()
         supported_extensions = ('.mp3', '.wav', '.flac', '.m4a', '.ogg')
 
-        supported_files = [
-            filename for filename in os.listdir(folder_path)
-            if filename.lower().endswith(supported_extensions)
-        ]
+        supported_files = []
 
         for root, dirs, files in os.walk(folder_path):
             for filename in files:
                 if filename.lower().endswith(supported_extensions):
-                    supported_files.append(os.path.join(root, filename))
+                    full_path = os.path.join(root, filename)
+                    supported_files.append(full_path)
 
         total = len(supported_files)
         count = 0
         count_fallback = 0
         count_fallback_manual = 0
         count_skipped = 0
-
+        
         for filename in supported_files:
             file_path = os.path.join(folder_path, filename)
 
-            if self.remove_empty_folders:
-                self._remove_empty_folders(folder_path)
-
-            if self.rename_and_move_only:
-                self.handle_fallback(file_path, folder_path)
-                count_skipped += 1
-                count += 1
-                self.logger.debug(f"☑️ Rename and Move only {filename}")
-                continue
-
-            #Check comment tag before calling Shazam
-            if self._has_roybatty_comment(file_path):
-                count_skipped += 1
-                self.logger.debug(f"☑️ Skipping {filename}")
-                continue
-            
-            if count >= self.max_queue_size:
-                self.logger.info(f"Max queue {self.max_queue_size} reached!")
-                break
-
-            self.logger.info(f"Searching... {filename}...")
             try:
+                if self.remove_empty_folders:
+                    self._remove_empty_folders(folder_path)
+
+                if self.rename_and_move_only:
+                    self.handle_fallback(file_path, folder_path)
+                    count_skipped += 1
+                    count += 1
+                    self.logger.debug(f"☑️ Rename and Move only {filename}")
+                    continue
+
+                #Check comment tag before calling Shazam
+                if self._has_roybatty_comment(file_path):
+                    count_skipped += 1
+                    self.logger.debug(f"☑️ Skipping {filename}")
+                    continue
+                
+                if count >= self.max_queue_size:
+                    self.logger.info(f"Max queue {self.max_queue_size} reached!")
+                    break
+
+                self.logger.info(f"Searching... {filename}...")
+            
                 count += 1
                 out = await shazam.recognize_song(file_path)
                 if out and out.get('track'):
@@ -310,8 +310,10 @@ class songIdentificator:
                     self.logger.info(f"👀Found! {artist} - {title} /{album}/{release_date}")
                     self._strip_tags(file_path)
                     new_path = self._rename_and_move(file_path, folder_path, artist, title)
+
                     self.update_tags(new_path, artist, title, cover_url, album, release_date, add_comment='roybatty')
                     self.logger.info(f"✅Processed!")
+
                     if self.notify_bot_signal and self.notifyEachSong:
                         payload = {
                             "📻": f"{title} - {artist}",
@@ -324,7 +326,29 @@ class songIdentificator:
                     count_fallback_manual = count_fallback_manual + self.handle_fallback(file_path, folder_path)
 
             except Exception as e:
-                self.handle_fallback(file_path, folder_path)
+                self.logger.error(f"❌ Failed to process {file_path}. Error: {e}")
+                try:
+                    parent_dir = Path(folder_path).parent
+                    quarantine_dir = parent_dir / 'quarantine' 
+                    os.makedirs(quarantine_dir, exist_ok=True)
+                    destination_path = os.path.join(quarantine_dir, os.path.basename(file_path))
+                    shutil.move(file_path, destination_path)
+                    self.logger.warning(f"☣️ Moved problematic file to {destination_path}")
+
+                    if self.notify_bot_signal and self.notifyErrors:
+                        payload = {
+                            "☣️": f"quarantine: {destination_path}"
+                        }
+                        self.logger.debug(f"✉️ sending notification {payload}")
+                        self.notify_bot_signal.sendMessage(payload=payload)
+
+                except Exception as move_error:
+                    msg = f"🚨 COULD NOT MOVE problematic file {file_path}. Error: {move_error}"
+                    self.logger.critical(msg)
+                    if self.notify_bot_signal and self.notifyErrors:
+                        self.notify_bot_signal.sendMessage(bot_message=msg)
+
+                continue # Always continue to the next file
             
         queueProcessingDuration = self._estimate_processing_time(total)
 

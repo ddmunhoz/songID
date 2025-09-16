@@ -32,6 +32,7 @@ class appConfig(pydantic.BaseModel):
     renameAndMoveOnly: bool = False
     removeEmptyFolders: bool = True 
     notifySignal: bool = False
+    notifyErrors: bool = True
     notifyEachSong: bool = False
     notifySummary: Annotated[int, pydantic.Field(ge=0)] = 5
     signalSender: str
